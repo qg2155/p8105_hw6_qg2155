@@ -51,7 +51,7 @@ homocide_data = homocide_data_raw %>%
          victim_race = fct_relevel(victim_race, "White"),
          victim_age = as.numeric(victim_age),
          case_status = if_else(disposition == "Closed by arrest", "Resolved", "Unresolved"),
-         case_status = fct_relevel(case_status, "Resolved")) %>%
+         case_status = fct_relevel(case_status, "Unresolved")) %>%
          mutate(city_state = paste(city,state, sep = ", ")) %>% 
          filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL"))
 ```
@@ -71,8 +71,8 @@ baltimore_logistic =
   glm(case_status ~ victim_age + victim_sex + victim_race, data = ., family = binomial()) %>% 
   broom::tidy() %>% 
   mutate(OR = exp(estimate),
-         ci_l = exp(estimate - std.error * 1.96),
-         ci_h = exp(estimate + std.error * 1.96)) %>% 
+         ci_l = exp(estimate - (std.error * 1.96)),
+         ci_h = exp(estimate + (std.error * 1.96))) %>% 
   select(term, log_OR = estimate, OR, ci_l, ci_h, p.value) %>% 
   filter(term == "victim_raceNon-white") %>% 
   knitr::kable(digits = 3)
@@ -80,9 +80,11 @@ baltimore_logistic =
 baltimore_logistic
 ```
 
+In Baltimore, non-white victims have 0.441 times the odds of having a resolved homocide compared to white victims. We are 95% confident that the true odds ratio lies between 0.313 and 0.62. This odds ratio is statistically significant since the 95% confidence interval does not include the null value of 1 and the p-value is very close to 0. 
+
 ### Logistic regression for all cities
 
-Odds ratio for solving homocides comparing non-white victims to white victims in every city
+Odds ratio for solving homocides comparing non-white victims to white victims in every city.
 
 Create nested dataset using city_state
 
@@ -128,14 +130,14 @@ city_results %>%
   geom_point() +
   geom_errorbar(aes(ymin = ci_l, ymax = ci_h)) +
   labs(
-    title = "Odds Ratio for solving homocides comparing non-white victims to white victims by city",
+    title = "OR for solving homocides in non-white vs white victims",
     x = "City",
     y = "Solving homocides OR"
   ) +
   theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
-Boston has the highest odds of solved homocides for non-white victims. 
+As seen from this plot, Boston has the lowest odds of solved homocides for non-white victims. Followed by Omaha and Oakland all at an odds ratio of under 0.25. The cities where non-white victims have highest odds for solved homocides compared to white victims are Tampa, Birmingham, and Durham with odds ratios between 1 and 1.25. These cities with high odds ratios also have much wider confidence intervals, especially Durham with the upper bounds reaching 2.5. 
 
 ## Question 2
 
@@ -149,7 +151,7 @@ bw_data = read_csv(file = "./birthweight.csv") %>%
          mrace = as.factor(mrace)) 
 ```
 
-This dataset has `r nrow(bw_data)` observations and `r ncol(bw_data)` variables. Categorical variables have been switched to factors. Using the commant skimr::skim, none of the variables seem to be missing any observations. 
+This dataset has `r nrow(bw_data)` observations and `r ncol(bw_data)` variables. Categorical variables have been switched to factors. Using skimr::skim, we can see that none of the variables seem to be missing any observations. 
 
 ```{r}
 bw_data %>% 
@@ -157,10 +159,12 @@ bw_data %>%
 ```
 
 ### Proposed linear model for birthweight (bwt)
-mother's age at devlivery: momage, 
-previous number of low birth weight babies: pnumlbw,
-family monthly income: fincome,
-gestational age in weeks: gaweeks
+I picked the following predictors because they seem to be related to baby birthweight based on prior knowledge from other public health courses.
+
+* mother's age at devlivery: momage, 
+* previous number of low birth weight babies: pnumlbw,
+* family monthly income: fincome,
+* gestational age in weeks: gaweeks
 
 ```{r}
 bwt_linear = lm(bwt ~ momage + pnumlbw + fincome + gaweeks, data = bw_data) 
@@ -168,14 +172,43 @@ bwt_linear = lm(bwt ~ momage + pnumlbw + fincome + gaweeks, data = bw_data)
 
 Graphing the proposed linear model
 
-```{r}
+Violin plots for residuals and predictors 
+```{r, warning = FALSE}
+bw_data %>% 
+  modelr::add_residuals(bwt_linear) %>% 
+  ggplot(aes(x = momage, y = resid)) + geom_violin()
+
+bw_data %>% 
+  modelr::add_residuals(bwt_linear) %>% 
+  ggplot(aes(x = pnumlbw, y = resid)) + geom_violin()
+
+bw_data %>% 
+  modelr::add_residuals(bwt_linear) %>% 
+  ggplot(aes(x = fincome, y = resid)) + geom_violin()
+
+bw_data %>% 
+  modelr::add_residuals(bwt_linear) %>% 
+  ggplot(aes(x = gaweeks, y = resid)) + geom_violin()
+```
+
+* These violin plots show that the residual is around 0 for each of the predictors, which is what we want to see. 
+
+```{r, warning = FALSE}
 bw_data %>% 
   add_residuals(bwt_linear) %>% 
   add_predictions(bwt_linear) %>% 
-  ggplot(aes(x = pred, y = resid)) + geom_point()
+  ggplot(aes(x = pred, y = resid)) + 
+  geom_point() +
+  labs(
+    title = "Model residuals vs Fitted values",
+    x = "Predicted (fitted) values",
+    y = "Residuals"
+  ) 
 ```
 
-Main effect and interaction models 
+This graph show that there is a random scatter of residuals where there is no particular pattern or trend seen in residuals of fitted values. This means that they are independent from the fitted values. Furthermore, the data points are generally scattered around 0 for residuals as expected. 
+
+### Main effect and interaction models 
 
 ```{r}
 bwt_maineff = lm(bwt ~ blength + gaweeks, data = bw_data)
@@ -183,15 +216,17 @@ bwt_maineff = lm(bwt ~ blength + gaweeks, data = bw_data)
 bwt_interact = lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*babysex, data = bw_data)
 ```
 
+### Cross validation
+
 ```{r}
 cv_df = 
   crossv_mc(bw_data, 100) 
 ```
 
-```{r}
+```{r, warning = FALSE}
 cv_df = 
   cv_df %>% 
-  mutate(bwt_linear = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+  mutate(bwt_linear = map(train, ~lm(bwt ~ momage + pnumlbw + fincome + gaweeks, data = .x)),
          bwt_maineff = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
          bwt_interact = map(train, ~lm(bwt ~ bhead + blength + babysex + bhead*blength + bhead*babysex + blength*babysex + bhead*blength*babysex, data = .x))) %>% 
   mutate(rmse_linear = map2_dbl(bwt_linear, test, ~rmse(model = .x, data = .y)),
@@ -201,16 +236,21 @@ cv_df =
 
 Plotting the rmse of each model
 
-```{r}
+```{r, warning = FALSE}
 cv_df %>% 
   select(starts_with("rmse")) %>% 
   gather(key = model, value = rmse) %>%  
   mutate(model = str_replace(model, "rmse_", ""),
          model = fct_inorder(model)) %>% 
-  ggplot(aes(x = model, y = rmse)) + geom_violin()
+  ggplot(aes(x = model, y = rmse)) + geom_violin() +
+  labs(
+    title = "RMSE for each birthweight model",
+    x = "Model",
+    y = "RMSE"
+  ) 
 ```
 
-The interaction model has the lowest rmse (287.4692) and therefore it is the best model. 
+This plot shows the distribution of RMSE values for each model. The proposed model has the highest RMSE values. The main effect model appears to be in between proposed and interaction models for distribution of RMSE. However, the interaction model seems to be the best out of the three because it has the lowest RMSE values. 
 
 ```{r}
 rmse(bwt_linear, bw_data)
@@ -218,5 +258,6 @@ rmse(bwt_maineff, bw_data)
 rmse(bwt_interact, bw_data)
 ```
 
+To further confirm, the interaction model has the lowest rmse of 287.4692. This is much smaller than the proposed model (RMSE:462.1494) and the main effect model (RMSE:333.1023). Therefore, the interaction model is the best model. 
 
 
